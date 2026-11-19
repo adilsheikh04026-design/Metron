@@ -2,36 +2,136 @@
 "use strict";
 
 /*
-  METRON CONFIGURATION
-
-  Replace these two values with your own Supabase project details.
-  Never put your Supabase service_role key in this file.
+  METRON FIREBASE AUTHENTICATION
+  Firebase Authentication handles sign-in.
+  Firestore users/{uid} stores the approved role and profile.
 */
 
-const SUPABASE_URL = "https://hyiozqhuxnuuertgppvi.supabase.co";
+const firebaseConfig = {
+  apiKey: "AIzaSyCkwkobuoXZrbUmal-RZl3DMEpoWK4nJI",
+  authDomain: "metron-c5bcc.firebaseapp.com",
+  projectId: "metron-c5bcc",
+  storageBucket: "metron-c5bcc.firebasestorage.app",
+  messagingSenderId: "641629648403",
+  appId: "1:641629648403:web:ce51547dfca7320e6331e6",
+  measurementId: "G-N3BQS594Q2"
+};
 
-const SUPABASE_KEY = "sb_publishable_vmZKtUVwhswrGXZDFOdHJg_nINgnvaF";
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
 
-const supabaseClient = window.supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_KEY
-);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const googleProvider = new firebase.auth.GoogleAuthProvider();
 
 const el = id => document.getElementById(id);
 
 let currentUser = null;
 let currentProfile = null;
 let currentPage = "dashboard";
+let selectedRole = "student";
+let isLoginInProgress = false;
+let authInitialized = false;
 
 
 // --------------------------------
-// LOGIN
+// ROLE SELECTOR
+// --------------------------------
+
+document.querySelectorAll("[data-role]").forEach(button => {
+  button.addEventListener("click", () => {
+    selectedRole = button.dataset.role;
+
+    document.querySelectorAll("[data-role]").forEach(option => {
+      option.classList.toggle(
+        "selected",
+        option.dataset.role === selectedRole
+      );
+
+      option.setAttribute(
+        "aria-pressed",
+        String(option.dataset.role === selectedRole)
+      );
+    });
+
+    el("selectedRoleText").textContent =
+      "Signing in as " +
+      selectedRole.charAt(0).toUpperCase() +
+      selectedRole.slice(1);
+  });
+});
+
+
+// --------------------------------
+// CHECK ROLE AND OPEN PORTAL
+// --------------------------------
+
+async function loadProfile(user) {
+  const profileSnapshot = await db
+    .collection("users")
+    .doc(user.uid)
+    .get();
+
+  if (!profileSnapshot.exists) {
+    console.warn(
+      "Metron account needs an approved role. Firebase UID:",
+      user.uid
+    );
+
+    await auth.signOut();
+
+    throw new Error(
+      "This account is not registered in Metron yet. Ask your administrator to add your account."
+    );
+  }
+
+  const profile = profileSnapshot.data();
+  const allowedRoles = ["student", "teacher", "admin"];
+
+  if (!allowedRoles.includes(profile.role)) {
+    await auth.signOut();
+
+    throw new Error(
+      "This account has an invalid portal role. Contact the administrator."
+    );
+  }
+
+  if (profile.role !== selectedRole) {
+    await auth.signOut();
+
+    throw new Error(
+      "This account is registered as " +
+      profile.role +
+      ". Please select the correct login option."
+    );
+  }
+
+  currentUser = user;
+
+  currentProfile = {
+    full_name:
+      profile.full_name ||
+      user.displayName ||
+      user.email ||
+      "Metron User",
+
+    role: profile.role,
+    student_id: profile.student_id || ""
+  };
+
+  loginToPortal();
+}
+
+
+// --------------------------------
+// EMAIL AND PASSWORD LOGIN
 // --------------------------------
 
 el("loginForm").addEventListener("submit", async event => {
   event.preventDefault();
 
-  const identifier = el("identifier").value.trim();
+  const email = el("identifier").value.trim();
   const password = el("password").value;
   const button = el("loginBtn");
 
@@ -39,61 +139,28 @@ el("loginForm").addEventListener("submit", async event => {
   button.disabled = true;
   button.textContent = "Signing in...";
 
+  isLoginInProgress = true;
+
   try {
-    let result;
+    const result = await auth.signInWithEmailAndPassword(
+      email,
+      password
+    );
 
-    if (identifier.includes("@")) {
-      // College email login
-      result = await supabaseClient.auth.signInWithPassword({
-        email: identifier,
-        password
-      });
-    } else {
-      // Username / student ID login
-      result = await supabaseClient.functions.invoke(
-        "login-with-identifier",
-        {
-          body: {
-            identifier,
-            password
-          }
-        }
-      );
-
-      if (result.error) {
-        throw result.error;
-      }
-
-      const data = result.data;
-
-      if (!data || !data.access_token || !data.refresh_token) {
-        throw new Error("Unable to complete login.");
-      }
-
-      // Establish the returned authenticated session
-      result = await supabaseClient.auth.setSession({
-        access_token: data.access_token,
-        refresh_token: data.refresh_token
-      });
-    }
-
-    if (result.error) {
-      throw result.error;
-    }
-
-    const { data: authData } = await supabaseClient.auth.getUser();
-
-    if (!authData.user) {
-      throw new Error("User session could not be verified.");
-    }
-
-    await loadProfile(authData.user);
+    await loadProfile(result.user);
 
   } catch (error) {
     console.error(error);
+
     el("loginError").textContent =
-      "Login failed. Check your details or contact the administrator.";
+      error.message.includes("not registered") ||
+      error.message.includes("registered as") ||
+      error.message.includes("invalid portal role")
+        ? error.message
+        : "Login failed. Please check your email and password.";
+
   } finally {
+    isLoginInProgress = false;
     button.disabled = false;
     button.textContent = "Sign in to portal →";
   }
@@ -101,27 +168,41 @@ el("loginForm").addEventListener("submit", async event => {
 
 
 // --------------------------------
-// LOAD USER PROFILE
+// GOOGLE LOGIN
 // --------------------------------
 
-async function loadProfile(user) {
+el("googleLoginBtn").addEventListener("click", async () => {
+  const button = el("googleLoginBtn");
 
-  const { data, error } = await supabaseClient
-    .from("profiles")
-    .select("id, full_name, role, username, student_id")
-    .eq("id", user.id)
-    .single();
+  el("loginError").textContent = "";
+  button.disabled = true;
+  button.textContent = "Connecting to Google...";
 
-  if (error || !data) {
-    await supabaseClient.auth.signOut();
-    throw new Error("Your portal profile could not be found.");
+  isLoginInProgress = true;
+
+  try {
+    const result = await auth.signInWithPopup(googleProvider);
+
+    await loadProfile(result.user);
+
+  } catch (error) {
+    console.error(error);
+
+    el("loginError").textContent =
+      error.message.includes("not registered") ||
+      error.message.includes("registered as") ||
+      error.message.includes("invalid portal role")
+        ? error.message
+        : "Google sign-in failed. Please try again.";
+
+  } finally {
+    isLoginInProgress = false;
+    button.disabled = false;
+
+    button.innerHTML =
+      '<span class="google-mark">G</span> Continue with Google';
   }
-
-  currentUser = user;
-  currentProfile = data;
-
-  loginToPortal();
-}
+});
 
 
 // --------------------------------
@@ -129,20 +210,19 @@ async function loadProfile(user) {
 // --------------------------------
 
 function loginToPortal() {
-
   el("loginPage").classList.add("hidden");
   el("portalPage").classList.remove("hidden");
 
   el("profileName").textContent = currentProfile.full_name;
-  el("profileRole").textContent = currentProfile.role.toUpperCase();
+  el("profileRole").textContent =
+    currentProfile.role.toUpperCase();
 
-  el("avatar").textContent =
-    currentProfile.full_name
-      .split(" ")
-      .map(word => word[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase();
+  el("avatar").textContent = currentProfile.full_name
+    .split(" ")
+    .map(word => word[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   el("roleBadge").textContent =
     currentProfile.role.toUpperCase();
@@ -157,8 +237,11 @@ function loginToPortal() {
 // --------------------------------
 
 async function logout() {
-
-  await supabaseClient.auth.signOut();
+  try {
+    await auth.signOut();
+  } catch (error) {
+    console.error(error);
+  }
 
   currentUser = null;
   currentProfile = null;
@@ -179,7 +262,6 @@ el("logoutBtn").addEventListener("click", logout);
 // --------------------------------
 
 function navItems() {
-
   const role = currentProfile.role;
 
   const items = [
@@ -205,7 +287,6 @@ function navItems() {
 
 
 function renderNavigation() {
-
   const items = navItems();
 
   if (!items.some(item => item[0] === currentPage)) {
@@ -230,7 +311,8 @@ function renderNavigation() {
   });
 
   el("crumb").textContent =
-    items.find(item => item[0] === currentPage)?.[2] || "Dashboard";
+    items.find(item => item[0] === currentPage)?.[2] ||
+    "Dashboard";
 }
 
 
@@ -245,6 +327,7 @@ function heading(title, description) {
         <h1>${escapeHTML(title)}</h1>
         <p>${escapeHTML(description)}</p>
       </div>
+
       <span class="date-chip">
         ${new Date().toLocaleDateString("en-IN", {
           weekday: "short",
@@ -257,6 +340,7 @@ function heading(title, description) {
   `;
 }
 
+
 function panel(title, body, description = "") {
   return `
     <section class="panel">
@@ -266,10 +350,12 @@ function panel(title, body, description = "") {
           <p>${escapeHTML(description)}</p>
         </div>
       </div>
+
       ${body}
     </section>
   `;
 }
+
 
 function stat(icon, value, label) {
   return `
@@ -278,10 +364,12 @@ function stat(icon, value, label) {
         ${escapeHTML(label)}
         <span class="stat-icon">${icon}</span>
       </div>
+
       <h2>${value}</h2>
     </div>
   `;
 }
+
 
 function escapeHTML(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -293,9 +381,11 @@ function escapeHTML(value) {
   })[char]);
 }
 
+
 function emptyMessage(message) {
   return `<div class="empty">${escapeHTML(message)}</div>`;
 }
+
 
 function notify(message) {
   el("toast").textContent = message;
@@ -308,60 +398,23 @@ function notify(message) {
 
 
 // --------------------------------
-// DATABASE DATA
+// DATA PLACEHOLDERS
 // --------------------------------
+// Authentication is Firebase-only.
+// Live exam/student/marks data is not connected yet.
 
 async function getExams() {
-
-  const { data, error } = await supabaseClient
-    .from("exams")
-    .select("*")
-    .order("exam_date", { ascending: true });
-
-  if (error) throw error;
-
-  return data || [];
+  return [];
 }
 
 
 async function getStudents() {
-
-  const { data, error } = await supabaseClient
-    .from("students")
-    .select("*")
-    .order("full_name");
-
-  if (error) throw error;
-
-  return data || [];
+  return [];
 }
 
 
 async function getMarks() {
-
-  let query = supabaseClient
-    .from("marks")
-    .select(`
-      id,
-      student_id,
-      subject,
-      assessment,
-      exam_date,
-      obtained_marks,
-      total_marks,
-      students(full_name)
-    `)
-    .order("exam_date", { ascending: false });
-
-  if (currentProfile.role === "student") {
-    query = query.eq("student_id", currentProfile.student_id);
-  }
-
-  const { data, error } = await query;
-
-  if (error) throw error;
-
-  return data || [];
+  return [];
 }
 
 
@@ -370,9 +423,10 @@ async function getMarks() {
 // --------------------------------
 
 function examTable(exams) {
-
   if (!exams.length) {
-    return emptyMessage("No examination schedules have been published yet.");
+    return emptyMessage(
+      "No examination schedules have been published yet."
+    );
   }
 
   return `
@@ -404,7 +458,6 @@ function examTable(exams) {
 
 
 function marksTable(marks) {
-
   if (!marks.length) {
     return emptyMessage("No marks have been published yet.");
   }
@@ -428,7 +481,9 @@ function marksTable(marks) {
         <tbody>
           ${marks.map(mark => {
             const percentage = mark.total_marks > 0
-              ? Math.round(mark.obtained_marks / mark.total_marks * 100)
+              ? Math.round(
+                  mark.obtained_marks / mark.total_marks * 100
+                )
               : 0;
 
             return `
@@ -437,10 +492,12 @@ function marksTable(marks) {
                   ? `<td>${escapeHTML(mark.students?.full_name || "—")}</td>`
                   : ""
                 }
+
                 <td><b>${escapeHTML(mark.subject)}</b></td>
                 <td>${escapeHTML(mark.assessment)}</td>
                 <td>${escapeHTML(mark.exam_date || "—")}</td>
                 <td>${mark.obtained_marks} / ${mark.total_marks}</td>
+
                 <td>
                   <span class="pill ${percentage >= 40 ? "good" : ""}">
                     ${percentage}%
@@ -461,7 +518,6 @@ function marksTable(marks) {
 // --------------------------------
 
 async function dashboard() {
-
   const role = currentProfile.role;
 
   const [exams, marks] = await Promise.all([
@@ -470,11 +526,12 @@ async function dashboard() {
   ]);
 
   if (role === "student") {
-
     const average = marks.length
       ? Math.round(
           marks.reduce((sum, mark) =>
-            sum + (mark.obtained_marks / mark.total_marks * 100), 0
+            sum + (
+              mark.obtained_marks / mark.total_marks * 100
+            ), 0
           ) / marks.length
         )
       : 0;
@@ -505,7 +562,6 @@ async function dashboard() {
   }
 
   if (role === "teacher") {
-
     const students = await getStudents();
 
     return `
@@ -540,9 +596,16 @@ async function dashboard() {
     </div>
 
     <div class="grid2">
-      ${panel("Latest assessment records", marksTable(marks.slice(0, 5)))}
-      ${panel("Portal administration",
-        emptyMessage("Manage users, students, examinations and marks.")
+      ${panel(
+        "Latest assessment records",
+        marksTable(marks.slice(0, 5))
+      )}
+
+      ${panel(
+        "Portal administration",
+        emptyMessage(
+          "Manage users, students, examinations and marks."
+        )
       )}
     </div>
 
@@ -556,13 +619,12 @@ async function dashboard() {
 // --------------------------------
 
 async function render() {
-
   renderNavigation();
 
-  el("content").innerHTML = emptyMessage("Loading portal information...");
+  el("content").innerHTML =
+    emptyMessage("Loading portal information...");
 
   try {
-
     if (currentPage === "dashboard") {
       el("content").innerHTML = await dashboard();
       return;
@@ -576,6 +638,7 @@ async function render() {
           "Examination schedule",
           "View published examination dates, times and venues."
         )}
+
         ${panel("Published examinations", examTable(exams))}
       `;
       return;
@@ -591,13 +654,13 @@ async function render() {
             : "Marks & gradebook",
           "View academic assessment records."
         )}
+
         ${panel("Assessment records", marksTable(marks))}
       `;
       return;
     }
 
     if (currentPage === "students") {
-
       if (currentProfile.role === "student") {
         currentPage = "dashboard";
         return render();
@@ -617,6 +680,7 @@ async function render() {
                   <th>YEAR</th>
                 </tr>
               </thead>
+
               <tbody>
                 ${students.map(student => `
                   <tr>
@@ -633,7 +697,11 @@ async function render() {
         : emptyMessage("No students have been registered yet.");
 
       el("content").innerHTML = `
-        ${heading("Student directory", "View registered student profiles.")}
+        ${heading(
+          "Student directory",
+          "View registered student profiles."
+        )}
+
         ${panel("Registered students", table)}
       `;
       return;
@@ -641,9 +709,16 @@ async function render() {
 
     if (currentPage === "users") {
       el("content").innerHTML = `
-        ${heading("User management", "Administrator account management.")}
-        ${panel("Portal accounts",
-          emptyMessage("User management will be connected to the secure admin functions.")
+        ${heading(
+          "User management",
+          "Administrator account management."
+        )}
+
+        ${panel(
+          "Portal accounts",
+          emptyMessage(
+            "User management will be connected to the secure admin functions."
+          )
         )}
       `;
     }
@@ -666,6 +741,7 @@ el("menuBtn").addEventListener("click", () => {
   el("sidebar").classList.toggle("open");
 });
 
+
 function closeModal() {
   el("modalBg").classList.remove("show");
 }
@@ -680,25 +756,75 @@ el("modalBg").addEventListener("click", event => {
 
 
 // --------------------------------
-// RESTORE EXISTING SESSION
+// RESTORE FIREBASE SESSION
 // --------------------------------
 
-async function restoreSession() {
+auth.onAuthStateChanged(async user => {
+  if (authInitialized) return;
 
-  const { data, error } = await supabaseClient.auth.getSession();
+  authInitialized = true;
 
-  if (error) {
-    console.error(error);
-    return;
-  }
+  if (!user || isLoginInProgress) return;
 
-  if (data.session?.user) {
-    try {
-      await loadProfile(data.session.user);
-    } catch (error) {
-      console.error(error);
+  try {
+    const profileSnapshot = await db
+      .collection("users")
+      .doc(user.uid)
+      .get();
+
+    if (!profileSnapshot.exists) {
+      console.warn(
+        "Metron account needs an approved role. Firebase UID:",
+        user.uid
+      );
+
+      await auth.signOut();
+      return;
     }
-  }
-}
 
-restoreSession();
+    const profile = profileSnapshot.data();
+
+    if (!["student", "teacher", "admin"].includes(profile.role)) {
+      await auth.signOut();
+      return;
+    }
+
+    currentUser = user;
+
+    currentProfile = {
+      full_name:
+        profile.full_name ||
+        user.displayName ||
+        user.email ||
+        "Metron User",
+
+      role: profile.role,
+      student_id: profile.student_id || ""
+    };
+
+    selectedRole = profile.role;
+
+    document.querySelectorAll("[data-role]").forEach(option => {
+      option.classList.toggle(
+        "selected",
+        option.dataset.role === selectedRole
+      );
+
+      option.setAttribute(
+        "aria-pressed",
+        String(option.dataset.role === selectedRole)
+      );
+    });
+
+    el("selectedRoleText").textContent =
+      "Signing in as " +
+      selectedRole.charAt(0).toUpperCase() +
+      selectedRole.slice(1);
+
+    loginToPortal();
+
+  } catch (error) {
+    console.error("Could not restore Metron session:", error);
+    await auth.signOut();
+  }
+});
