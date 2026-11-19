@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Metron | Examination Portal</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="loginPage" class="login">
+  <div class="login-left">
+    <div class="brand">
+      <div class="brand-icon">M</div> Metron
+    </div>
+    <div class="login-copy">
+      <h1>Your academic world, connected.</h1>
+      <p>One portal for examination schedules, assessments, results and student performance.</p>
+    </div>
+    <div class="login-foot">
+      STUDENT ASSESSMENT & EXAM MANAGEMENT SYSTEM
+    </div>
+  </div>
+
+  <div class="login-right">
+    <div class="login-box">
+      <div class="portal-title">Metron Portal</div>
+      <h2 class="welcome-title">Welcome back</h2>
+      <p class="muted">Sign in to open your examination portal.</p>
+
+      <form id="loginForm">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" placeholder="Enter username" autocomplete="username" required>
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" placeholder="Enter password" autocomplete="current-password" required>
+        </div>
+
+        <button class="btn primary full" type="submit">
+          Sign in to portal →
+        </button>
+
+        <div id="loginError" class="error"></div>
+      </form>
+
+      <div class="demo">
+        <strong>Demo accounts</strong><br>
+        Choose a role to autofill its demo credentials.
+
+        <div class="demo-row">
+          <button type="button" data-demo="admin">
+            ADMIN<br>admin / admin123
+          </button>
+
+          <button type="button" data-demo="teacher">
+            TEACHER<br>teacher / teach123
+          </button>
+
+          <button type="button" data-demo="student">
+            STUDENT<br>student / stud123
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="portalPage" class="portal hidden">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebrand">
+      <div class="brand-icon">M</div>
+      <div>
+        <b>Metron</b>
+        <small>EXAMINATION PORTAL</small>
+      </div>
+    </div>
+
+    <div class="nav-label">MAIN MENU</div>
+    <nav class="nav" id="nav"></nav>
+
+    <div class="side-bottom">
+      <div class="demo-note">
+        <b>Demo portal</b><br>
+        Sample information only. Browser changes are saved locally.
+      </div>
+
+      <div class="user-mini">
+        <div class="avatar" id="avatar">AD</div>
+        <div>
+          <b id="profileName">Administrator</b>
+          <small id="profileRole">ADMIN</small>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn secondary mobile-menu" id="menuBtn">☰</button>
+        <span class="crumb">Metron / <b id="crumb">Dashboard</b></span>
+      </div>
+
+      <div class="top-actions">
+        <span id="roleBadge" class="role">ADMIN</span>
+        <button class="btn secondary" id="logoutBtn">Log out ↗</button>
+      </div>
+    </header>
+
+    <div class="content" id="content"></div>
+  </main>
+</section>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="modalTitle">Add record</h2>
+      <button class="close" id="modalClose">✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
