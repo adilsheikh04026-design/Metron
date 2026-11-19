@@ -406,23 +406,49 @@ function notify(message) {
 
 
 // --------------------------------
-// DATA PLACEHOLDERS
+
 // --------------------------------
-// Authentication is Firebase-only.
-// Live exam/student/marks data is not connected yet.
+// FIRESTORE DATA
+// --------------------------------
 
 async function getExams() {
-  return [];
+  const snapshot = await db.collection("exams").get();
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    .sort((a, b) => String(a.exam_date || "").localeCompare(String(b.exam_date || "")));
 }
-
 
 async function getStudents() {
-  return [];
+  const snapshot = await db.collection("students").get();
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    .sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || "")));
 }
 
-
 async function getMarks() {
-  return [];
+  let query = db.collection("marks");
+
+  if (currentProfile.role === "student") {
+    query = query.where(
+      "student_email",
+      "==",
+      String(currentUser.email || "").toLowerCase()
+    );
+  }
+
+  const snapshot = await query.get();
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+async function getUsers() {
+  const snapshot = await db.collection("users").get();
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+function canManageStudents() {
+  return ["teacher", "admin"].includes(currentProfile.role);
+}
+
+function isAdmin() {
+  return currentProfile.role === "admin";
 }
 
 
@@ -431,10 +457,10 @@ async function getMarks() {
 // --------------------------------
 
 function examTable(exams) {
+  const actions = isAdmin();
+
   if (!exams.length) {
-    return emptyMessage(
-      "No examination schedules have been published yet."
-    );
+    return emptyMessage("No examination schedules have been published yet.");
   }
 
   return `
@@ -446,9 +472,9 @@ function examTable(exams) {
             <th>DATE</th>
             <th>TIME</th>
             <th>VENUE</th>
+            ${actions ? "<th>ACTIONS</th>" : ""}
           </tr>
         </thead>
-
         <tbody>
           ${exams.map(exam => `
             <tr>
@@ -456,6 +482,12 @@ function examTable(exams) {
               <td>${escapeHTML(exam.exam_date)}</td>
               <td>${escapeHTML(exam.exam_time || "—")}</td>
               <td>${escapeHTML(exam.venue || "—")}</td>
+              ${actions ? `
+                <td>
+                  <button class="link" data-action="edit-exam" data-id="${exam.id}">Edit</button>
+                  <button class="link" data-action="delete-exam" data-id="${exam.id}">Delete</button>
+                </td>
+              ` : ""}
             </tr>
           `).join("")}
         </tbody>
@@ -466,11 +498,12 @@ function examTable(exams) {
 
 
 function marksTable(marks) {
-  if (!marks.length) {
-    return emptyMessage("No marks have been published yet.");
-  }
-
   const isStudent = currentProfile.role === "student";
+  const actions = canManageStudents();
+
+  if (!marks.length) {
+    return emptyMessage("No marks have been entered yet.");
+  }
 
   return `
     <div class="table-wrap">
@@ -483,34 +516,29 @@ function marksTable(marks) {
             <th>DATE</th>
             <th>MARKS</th>
             <th>RESULT</th>
+            ${actions ? "<th>ACTIONS</th>" : ""}
           </tr>
         </thead>
-
         <tbody>
           ${marks.map(mark => {
-            const percentage = mark.total_marks > 0
-              ? Math.round(
-                  mark.obtained_marks / mark.total_marks * 100
-                )
+            const percentage = Number(mark.total_marks) > 0
+              ? Math.round(Number(mark.obtained_marks) / Number(mark.total_marks) * 100)
               : 0;
 
             return `
               <tr>
-                ${!isStudent
-                  ? `<td>${escapeHTML(mark.students?.full_name || "—")}</td>`
-                  : ""
-                }
-
-                <td><b>${escapeHTML(mark.subject)}</b></td>
+                ${!isStudent ? `<td><b>${escapeHTML(mark.student_name || "—")}</b></td>` : ""}
+                <td>${escapeHTML(mark.subject)}</td>
                 <td>${escapeHTML(mark.assessment)}</td>
                 <td>${escapeHTML(mark.exam_date || "—")}</td>
-                <td>${mark.obtained_marks} / ${mark.total_marks}</td>
-
-                <td>
-                  <span class="pill ${percentage >= 40 ? "good" : ""}">
-                    ${percentage}%
-                  </span>
-                </td>
+                <td>${escapeHTML(mark.obtained_marks)} / ${escapeHTML(mark.total_marks)}</td>
+                <td><span class="pill ${percentage >= 40 ? "good" : ""}">${percentage}%</span></td>
+                ${actions ? `
+                  <td>
+                    <button class="link" data-action="edit-mark" data-id="${mark.id}">Edit</button>
+                    <button class="link" data-action="delete-mark" data-id="${mark.id}">Delete</button>
+                  </td>
+                ` : ""}
               </tr>
             `;
           }).join("")}
@@ -521,102 +549,431 @@ function marksTable(marks) {
 }
 
 
+function studentsTable(students) {
+  if (!students.length) {
+    return emptyMessage("No students have been added yet.");
+  }
+
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>NAME</th>
+            <th>ROLL NUMBER</th>
+            <th>COURSE</th>
+            <th>YEAR</th>
+            <th>EMAIL</th>
+            <th>ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${students.map(student => `
+            <tr>
+              <td><b>${escapeHTML(student.full_name)}</b></td>
+              <td>${escapeHTML(student.student_id)}</td>
+              <td>${escapeHTML(student.course || "—")}</td>
+              <td>${escapeHTML(student.year || "—")}</td>
+              <td>${escapeHTML(student.email || "—")}</td>
+              <td>
+                <button class="link" data-action="edit-student" data-id="${student.id}">Edit</button>
+                <button class="link" data-action="delete-student" data-id="${student.id}">Remove</button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+
+// --------------------------------
+// MODAL HELPERS
+// --------------------------------
+
+function openModal(title, body) {
+  el("modalTitle").textContent = title;
+  el("modalBody").innerHTML = body;
+  el("modalBg").classList.add("show");
+}
+
+function closeModal() {
+  el("modalBg").classList.remove("show");
+}
+
+el("modalClose").addEventListener("click", closeModal);
+
+el("modalBg").addEventListener("click", event => {
+  if (event.target === el("modalBg")) closeModal();
+});
+
+function field(label, name, value = "", type = "text", required = true) {
+  return `
+    <div class="field">
+      <label>${escapeHTML(label)}</label>
+      <input
+        name="${name}"
+        type="${type}"
+        value="${escapeHTML(value)}"
+        ${required ? "required" : ""}
+      >
+    </div>
+  `;
+}
+
+
+// --------------------------------
+// ADD / EDIT STUDENT
+// --------------------------------
+
+async function studentForm(id = "") {
+  let student = {};
+
+  if (id) {
+    const doc = await db.collection("students").doc(id).get();
+    if (!doc.exists) return notify("Student not found.");
+    student = doc.data();
+  }
+
+  openModal(id ? "Edit Student" : "Add Student", `
+    <form id="studentForm">
+      ${field("Student Name", "full_name", student.full_name)}
+      ${field("Roll Number", "student_id", student.student_id)}
+      ${field("Course", "course", student.course)}
+      ${field("Year", "year", student.year)}
+      ${field("Google Login Email", "email", student.email, "email")}
+
+      <button class="btn primary full" type="submit">
+        ${id ? "Save Changes" : "Add Student"}
+      </button>
+    </form>
+  `);
+
+  el("studentForm").addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const form = new FormData(event.target);
+    const data = {
+      full_name: String(form.get("full_name")).trim(),
+      student_id: String(form.get("student_id")).trim(),
+      course: String(form.get("course")).trim(),
+      year: String(form.get("year")).trim(),
+      email: String(form.get("email")).trim().toLowerCase()
+    };
+
+    try {
+      if (id) {
+        await db.collection("students").doc(id).update(data);
+      } else {
+        await db.collection("students").add(data);
+      }
+
+      closeModal();
+      notify("Student saved successfully.");
+      await render();
+    } catch (error) {
+      console.error(error);
+      notify("Could not save student. Check Firestore rules.");
+    }
+  });
+}
+
+
+// --------------------------------
+// ADD / EDIT EXAM
+// --------------------------------
+
+async function examForm(id = "") {
+  if (!isAdmin()) return;
+
+  let exam = {};
+
+  if (id) {
+    const doc = await db.collection("exams").doc(id).get();
+    if (!doc.exists) return notify("Exam not found.");
+    exam = doc.data();
+  }
+
+  openModal(id ? "Edit Examination" : "Add Examination", `
+    <form id="examForm">
+      ${field("Examination Name", "name", exam.name)}
+      ${field("Examination Date", "exam_date", exam.exam_date, "date")}
+      ${field("Examination Time", "exam_time", exam.exam_time, "time", false)}
+      ${field("Venue", "venue", exam.venue, "text", false)}
+
+      <button class="btn primary full" type="submit">
+        ${id ? "Save Changes" : "Publish Examination"}
+      </button>
+    </form>
+  `);
+
+  el("examForm").addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const form = new FormData(event.target);
+    const data = {
+      name: String(form.get("name")).trim(),
+      exam_date: String(form.get("exam_date")),
+      exam_time: String(form.get("exam_time")),
+      venue: String(form.get("venue")).trim()
+    };
+
+    try {
+      if (id) {
+        await db.collection("exams").doc(id).update(data);
+      } else {
+        await db.collection("exams").add(data);
+      }
+
+      closeModal();
+      notify("Examination saved.");
+      await render();
+    } catch (error) {
+      console.error(error);
+      notify("Could not save examination.");
+    }
+  });
+}
+
+
+// --------------------------------
+// ADD / EDIT MARKS
+// --------------------------------
+
+async function markForm(id = "") {
+  if (!canManageStudents()) return;
+
+  const students = await getStudents();
+
+  if (!students.length) {
+    return notify("Add a student before entering marks.");
+  }
+
+  let mark = {};
+
+  if (id) {
+    const doc = await db.collection("marks").doc(id).get();
+    if (!doc.exists) return notify("Mark record not found.");
+    mark = doc.data();
+  }
+
+  openModal(id ? "Edit Marks" : "Add Marks", `
+    <form id="markForm">
+      <div class="field">
+        <label>Student</label>
+        <select name="student_doc" required>
+          <option value="">Select student</option>
+          ${students.map(student => `
+            <option
+              value="${student.id}"
+              ${student.email === mark.student_email ? "selected" : ""}
+            >
+              ${escapeHTML(student.full_name)} (${escapeHTML(student.student_id)})
+            </option>
+          `).join("")}
+        </select>
+      </div>
+
+      ${field("Subject", "subject", mark.subject)}
+      ${field("Assessment", "assessment", mark.assessment)}
+      ${field("Exam Date", "exam_date", mark.exam_date, "date", false)}
+      ${field("Obtained Marks", "obtained_marks", mark.obtained_marks, "number")}
+      ${field("Total Marks", "total_marks", mark.total_marks, "number")}
+
+      <button class="btn primary full" type="submit">
+        ${id ? "Update Marks" : "Save Marks"}
+      </button>
+    </form>
+  `);
+
+  el("markForm").addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const form = new FormData(event.target);
+    const student = students.find(s => s.id === form.get("student_doc"));
+
+    const obtained = Number(form.get("obtained_marks"));
+    const total = Number(form.get("total_marks"));
+
+    if (!student) return notify("Please select a student.");
+    if (!Number.isFinite(obtained) || !Number.isFinite(total) ||
+        total <= 0 || obtained < 0 || obtained > total) {
+      return notify("Enter valid marks. Obtained marks cannot exceed total marks.");
+    }
+
+    const data = {
+      student_email: String(student.email).toLowerCase(),
+      student_name: student.full_name,
+      student_id: student.student_id,
+      subject: String(form.get("subject")).trim(),
+      assessment: String(form.get("assessment")).trim(),
+      exam_date: String(form.get("exam_date")),
+      obtained_marks: obtained,
+      total_marks: total
+    };
+
+    try {
+      if (id) {
+        await db.collection("marks").doc(id).update(data);
+      } else {
+        await db.collection("marks").add(data);
+      }
+
+      closeModal();
+      notify("Marks saved successfully.");
+      await render();
+    } catch (error) {
+      console.error(error);
+      notify("Could not save marks. Check Firestore rules.");
+    }
+  });
+}
+
+
+// --------------------------------
+// ADMIN USER MANAGEMENT
+// --------------------------------
+
+async function usersPage() {
+  if (!isAdmin()) return "";
+
+  const users = await getUsers();
+
+  const rows = users.map(user => `
+    <tr>
+      <td><b>${escapeHTML(user.full_name || "User")}</b></td>
+      <td>${escapeHTML(user.role || "—")}</td>
+      <td>${escapeHTML(user.id)}</td>
+      <td>
+        ${user.id !== currentUser.uid ? `
+          <button class="link" data-action="edit-user" data-id="${user.id}">Change Role</button>
+          <button class="link" data-action="delete-user" data-id="${user.id}">Remove Access</button>
+        ` : "Current account"}
+      </td>
+    </tr>
+  `).join("");
+
+  return `
+    ${heading("User management", "Manage access to the Metron portal.")}
+    ${panel("Registered accounts", users.length ? `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>NAME</th><th>ROLE</th><th>USER ID</th><th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    ` : emptyMessage("No user accounts found."))}
+  `;
+}
+
+async function editUserRole(id) {
+  if (!isAdmin() || id === currentUser.uid) return;
+
+  const doc = await db.collection("users").doc(id).get();
+  if (!doc.exists) return notify("User not found.");
+
+  const user = doc.data();
+
+  openModal("Change User Role", `
+    <form id="userRoleForm">
+      <p>${escapeHTML(user.full_name || "User")}</p>
+      <div class="field">
+        <label>Account Role</label>
+        <select name="role" required>
+          <option value="student" ${user.role === "student" ? "selected" : ""}>Student</option>
+          <option value="teacher" ${user.role === "teacher" ? "selected" : ""}>Teacher</option>
+          <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
+        </select>
+      </div>
+      <button class="btn primary full" type="submit">Save Role</button>
+    </form>
+  `);
+
+  el("userRoleForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    const role = new FormData(event.target).get("role");
+
+    try {
+      await db.collection("users").doc(id).update({ role });
+      closeModal();
+      notify("User role updated.");
+      await render();
+    } catch (error) {
+      console.error(error);
+      notify("Could not update role.");
+    }
+  });
+}
+
+
 // --------------------------------
 // DASHBOARD
 // --------------------------------
 
 async function dashboard() {
   const role = currentProfile.role;
-
-  const [exams, marks] = await Promise.all([
-    getExams(),
-    getMarks()
-  ]);
+  const [exams, marks] = await Promise.all([getExams(), getMarks()]);
 
   if (role === "student") {
-    const average = marks.length
-      ? Math.round(
-          marks.reduce((sum, mark) =>
-            sum + (
-              mark.obtained_marks / mark.total_marks * 100
-            ), 0
-          ) / marks.length
-        )
-      : 0;
-
     return `
       ${heading(
         "Welcome, " + currentProfile.full_name.split(" ")[0],
-        "Here is your examination portal overview."
-      )}
-
-      <div class="hero-card">
-        <small>YOUR CURRENT ASSESSMENT AVERAGE</small>
-        <h2>${average}%</h2>
-        <p>Based on marks published to your student account.</p>
-      </div>
-
-      <div class="stats">
-        ${stat("▦", exams.length, "Exam schedules")}
-        ${stat("▤", marks.length, "Published results")}
-        ${stat("♙", "1", "Your student profile")}
-      </div>
-
-      <div class="grid2">
-        ${panel("My recent results", marksTable(marks.slice(0, 5)))}
-        ${panel("Examination timetable", examTable(exams))}
-      </div>
-    `;
-  }
-
-  if (role === "teacher") {
-    const students = await getStudents();
-
-    return `
-      ${heading(
-        "Faculty dashboard",
-        "Manage your assessments and student results."
+        "View your upcoming examinations and published marks."
       )}
 
       <div class="stats">
-        ${stat("♙", students.length, "Students")}
-        ${stat("▤", marks.length, "Mark records")}
-        ${stat("▦", exams.length, "Exam schedules")}
+        ${stat("▦", exams.length, "Examinations")}
+        ${stat("▤", marks.length, "Your results")}
       </div>
 
-      ${panel("Assessment gradebook", marksTable(marks))}
-      ${panel("Examination timetable", examTable(exams))}
+      ${panel("Upcoming examinations", examTable(exams))}
+      ${panel("My marks", marksTable(marks))}
     `;
   }
 
   const students = await getStudents();
 
+  if (role === "teacher") {
+    return `
+      ${heading("Faculty dashboard", "Manage students and their assessment marks.")}
+
+      <div class="stats">
+        ${stat("♙", students.length, "Students")}
+        ${stat("▤", marks.length, "Mark records")}
+        ${stat("▦", exams.length, "Examinations")}
+      </div>
+
+      ${panel("Quick actions", `
+        <button class="btn primary" data-action="add-student">Add Student</button>
+        <button class="btn primary" data-action="add-mark">Add Marks</button>
+      `)}
+
+      ${panel("Recent marks", marksTable(marks))}
+      ${panel("Upcoming examinations", examTable(exams))}
+    `;
+  }
+
   return `
-    ${heading(
-      "Administrator dashboard",
-      "Welcome to the central examination management portal."
-    )}
+    ${heading("Administrator dashboard", "Overall examination portal management.")}
 
     <div class="stats">
       ${stat("♙", students.length, "Students")}
       ${stat("▤", marks.length, "Mark records")}
-      ${stat("▦", exams.length, "Exam schedules")}
+      ${stat("▦", exams.length, "Examinations")}
     </div>
 
-    <div class="grid2">
-      ${panel(
-        "Latest assessment records",
-        marksTable(marks.slice(0, 5))
-      )}
+    ${panel("Quick actions", `
+      <button class="btn primary" data-action="add-student">Add Student</button>
+      <button class="btn primary" data-action="add-exam">Add Examination</button>
+      <button class="btn primary" data-action="add-mark">Add Marks</button>
+    `)}
 
-      ${panel(
-        "Portal administration",
-        emptyMessage(
-          "Manage users, students, examinations and marks."
-        )
-      )}
-    </div>
-
+    ${panel("Recent marks", marksTable(marks.slice(0, 5)))}
     ${panel("Examination timetable", examTable(exams))}
   `;
 }
@@ -629,8 +986,7 @@ async function dashboard() {
 async function render() {
   renderNavigation();
 
-  el("content").innerHTML =
-    emptyMessage("Loading portal information...");
+  el("content").innerHTML = emptyMessage("Loading portal information...");
 
   try {
     if (currentPage === "dashboard") {
@@ -642,11 +998,12 @@ async function render() {
       const exams = await getExams();
 
       el("content").innerHTML = `
-        ${heading(
-          "Examination schedule",
-          "View published examination dates, times and venues."
-        )}
-
+        ${heading("Examination schedule", "View examination dates, times and venues.")}
+        ${isAdmin() ? `
+          <div style="margin-bottom:14px">
+            <button class="btn primary" data-action="add-exam">Add Examination</button>
+          </div>
+        ` : ""}
         ${panel("Published examinations", examTable(exams))}
       `;
       return;
@@ -657,113 +1014,146 @@ async function render() {
 
       el("content").innerHTML = `
         ${heading(
-          currentProfile.role === "student"
-            ? "My results"
-            : "Marks & gradebook",
+          currentProfile.role === "student" ? "My results" : "Marks & gradebook",
           "View academic assessment records."
         )}
-
+        ${canManageStudents() ? `
+          <div style="margin-bottom:14px">
+            <button class="btn primary" data-action="add-mark">Add Marks</button>
+          </div>
+        ` : ""}
         ${panel("Assessment records", marksTable(marks))}
       `;
       return;
     }
 
     if (currentPage === "students") {
-      if (currentProfile.role === "student") {
+      if (!canManageStudents()) {
         currentPage = "dashboard";
         return render();
       }
 
       const students = await getStudents();
 
-      const table = students.length
-        ? `
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>STUDENT NAME</th>
-                  <th>STUDENT ID</th>
-                  <th>COURSE</th>
-                  <th>YEAR</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                ${students.map(student => `
-                  <tr>
-                    <td><b>${escapeHTML(student.full_name)}</b></td>
-                    <td>${escapeHTML(student.student_id)}</td>
-                    <td>${escapeHTML(student.course || "—")}</td>
-                    <td>${escapeHTML(student.year || "—")}</td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
-          </div>
-        `
-        : emptyMessage("No students have been registered yet.");
-
       el("content").innerHTML = `
-        ${heading(
-          "Student directory",
-          "View registered student profiles."
-        )}
-
-        ${panel("Registered students", table)}
+        ${heading("Student directory", "Add, edit and remove student academic records.")}
+        <div style="margin-bottom:14px">
+          <button class="btn primary" data-action="add-student">Add Student</button>
+        </div>
+        ${panel("Registered students", studentsTable(students))}
       `;
       return;
     }
 
-    if (currentPage === "users") {
-      el("content").innerHTML = `
-        ${heading(
-          "User management",
-          "Administrator account management."
-        )}
-
-        ${panel(
-          "Portal accounts",
-          emptyMessage(
-            "User management will be connected to the secure admin functions."
-          )
-        )}
-      `;
+    if (currentPage === "users" && isAdmin()) {
+      el("content").innerHTML = await usersPage();
+      return;
     }
+
+    currentPage = "dashboard";
+    return render();
 
   } catch (error) {
     console.error(error);
-
     el("content").innerHTML = emptyMessage(
-      "Unable to load this page. Please try again."
+      "Unable to load this page. Check your Firestore rules and try again."
     );
   }
 }
 
 
 // --------------------------------
-// MOBILE MENU AND MODAL
+// BUTTON ACTIONS
+// --------------------------------
+
+el("content").addEventListener("click", async event => {
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+
+  const action = button.dataset.action;
+  const id = button.dataset.id;
+
+  try {
+    if (action === "add-student" && canManageStudents()) {
+      return studentForm();
+    }
+
+    if (action === "edit-student" && canManageStudents()) {
+      return studentForm(id);
+    }
+
+    if (action === "delete-student" && canManageStudents()) {
+      if (!confirm("Remove this student record? Their existing marks will also be removed.")) return;
+
+      const marks = await db.collection("marks")
+        .where("student_id", "==", (await db.collection("students").doc(id).get()).data().student_id)
+        .get();
+
+      const batch = db.batch();
+      marks.docs.forEach(doc => batch.delete(doc.ref));
+      batch.delete(db.collection("students").doc(id));
+      await batch.commit();
+
+      notify("Student and their marks removed.");
+      return render();
+    }
+
+    if (action === "add-exam" && isAdmin()) {
+      return examForm();
+    }
+
+    if (action === "edit-exam" && isAdmin()) {
+      return examForm(id);
+    }
+
+    if (action === "delete-exam" && isAdmin()) {
+      if (!confirm("Delete this examination?")) return;
+      await db.collection("exams").doc(id).delete();
+      notify("Examination deleted.");
+      return render();
+    }
+
+    if (action === "add-mark" && canManageStudents()) {
+      return markForm();
+    }
+
+    if (action === "edit-mark" && canManageStudents()) {
+      return markForm(id);
+    }
+
+    if (action === "delete-mark" && canManageStudents()) {
+      if (!confirm("Delete this mark record?")) return;
+      await db.collection("marks").doc(id).delete();
+      notify("Mark record deleted.");
+      return render();
+    }
+
+    if (action === "edit-user" && isAdmin()) {
+      return editUserRole(id);
+    }
+
+    if (action === "delete-user" && isAdmin()) {
+      if (!confirm("Remove this user's Metron access? This does not delete their Google account.")) return;
+      await db.collection("users").doc(id).delete();
+      notify("Metron access removed.");
+      return render();
+    }
+
+  } catch (error) {
+    console.error(error);
+    notify("Action failed. Check your Firestore rules.");
+  }
+});
+
+
+// --------------------------------
+// MOBILE MENU
 // --------------------------------
 
 el("menuBtn").addEventListener("click", () => {
   el("sidebar").classList.toggle("open");
 });
 
-
-function closeModal() {
-  el("modalBg").classList.remove("show");
-}
-
-el("modalClose").addEventListener("click", closeModal);
-
-el("modalBg").addEventListener("click", event => {
-  if (event.target === el("modalBg")) {
-    closeModal();
-  }
-});
-
-
-// --------------------------------
 // RESTORE FIREBASE SESSION
 // --------------------------------
 
