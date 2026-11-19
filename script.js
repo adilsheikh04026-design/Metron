@@ -8,8 +8,9 @@
   Never put your Supabase service_role key in this file.
 */
 
-const SUPABASE_URL = "YOUR_SUPABASE_PROJECT_URL";
-const SUPABASE_KEY = "YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY";
+const SUPABASE_URL = "https://hyiozqhuxnuuertgppvi.supabase.co";
+
+const SUPABASE_KEY = "sb_publishable_vmZKtUVwhswrGXZDFOdHJg_nINgnvaF";
 
 const supabaseClient = window.supabase.createClient(
   SUPABASE_URL,
