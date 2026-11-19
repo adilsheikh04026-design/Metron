@@ -8,7 +8,7 @@
 */
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCkwkobuoXZrbUmal-RZl3DMEpoWK4nJI",
+  apiKey: "AIzaSyCkwkobuoXZrbUmal-RaZl3DMEpoWK4nJI",
   authDomain: "metron-c5bcc.firebaseapp.com",
   projectId: "metron-c5bcc",
   storageBucket: "metron-c5bcc.firebasestorage.app",
