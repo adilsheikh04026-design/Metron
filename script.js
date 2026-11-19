@@ -67,26 +67,33 @@ document.querySelectorAll("[data-role]").forEach(button => {
 // CHECK ROLE AND OPEN PORTAL
 // --------------------------------
 
+
 async function loadProfile(user) {
-  const profileSnapshot = await db
-    .collection("users")
-    .doc(user.uid)
-    .get();
+  const userRef = db.collection("users").doc(user.uid);
+  const profileSnapshot = await userRef.get();
+
+  let profile;
 
   if (!profileSnapshot.exists) {
-    console.warn(
-      "Metron account needs an approved role. Firebase UID:",
-      user.uid
-    );
+    if (selectedRole !== "student") {
+      await auth.signOut();
 
-    await auth.signOut();
+      throw new Error(
+        "This account is not registered as Teacher or Admin. Contact the administrator."
+      );
+    }
 
-    throw new Error(
-      "This account is not registered in Metron yet. Ask your administrator to add your account."
-    );
+    profile = {
+      full_name: user.displayName || user.email || "Student",
+      role: "student"
+    };
+
+    await userRef.set(profile);
+
+  } else {
+    profile = profileSnapshot.data();
   }
 
-  const profile = profileSnapshot.data();
   const allowedRoles = ["student", "teacher", "admin"];
 
   if (!allowedRoles.includes(profile.role)) {
@@ -122,6 +129,7 @@ async function loadProfile(user) {
 
   loginToPortal();
 }
+
 
 
 // --------------------------------
