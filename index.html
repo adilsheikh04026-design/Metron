@@ -7,8 +7,94 @@
   <title>Metron | Examination Portal</title>
   <link rel="stylesheet" href="style.css">
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
   <script src="script.js" defer></script>
+
+  <style>
+    .role-options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+      margin: 18px 0;
+    }
+    .role-option {
+      border: 1px solid #d9deea;
+      border-radius: 10px;
+      background: #fff;
+      color: #26334a;
+      padding: 12px 7px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      transition: .18s ease;
+    }
+    .role-option:hover { border-color: #5578d8; }
+    .role-option.selected {
+      border: 2px solid #3568d4;
+      background: #eef4ff;
+      color: #2455bd;
+      padding: 11px 6px;
+    }
+    .role-option .role-symbol {
+      display: block;
+      font-size: 21px;
+      margin-bottom: 5px;
+    }
+    .selected-role-text {
+      margin: -7px 0 14px;
+      color: #667085;
+      font-size: 12px;
+    }
+    .google-btn {
+      width: 100%;
+      margin-top: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: 1px solid #d9deea;
+      border-radius: 9px;
+      background: #fff;
+      color: #26334a;
+      padding: 12px 15px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .google-btn:hover { background: #f8faff; }
+    .google-btn:disabled, .role-option:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+    .google-mark {
+      font-size: 18px;
+      font-weight: 800;
+      color: #4285f4;
+    }
+    .login-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+      color: #98a2b3;
+      font-size: 11px;
+    }
+    .login-divider::before,
+    .login-divider::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: #e5e9f0;
+    }
+    @media (max-width: 420px) {
+      .role-options { gap: 6px; }
+      .role-option { font-size: 12px; padding: 10px 4px; }
+    }
+  </style>
 </head>
 <body>
 
@@ -40,16 +126,39 @@
         <div class="portal-title">Metron Portal</div>
 
         <h2>Welcome back</h2>
-        <p class="muted">Sign in to open your examination portal.</p>
+        <p class="muted">Select your account type and sign in.</p>
+
+        <div class="role-options" aria-label="Choose account type">
+          <button class="role-option selected" type="button"
+            data-role="student" aria-pressed="true">
+            <span class="role-symbol">🎓</span>
+            Student
+          </button>
+
+          <button class="role-option" type="button"
+            data-role="teacher" aria-pressed="false">
+            <span class="role-symbol">📚</span>
+            Teacher
+          </button>
+
+          <button class="role-option" type="button"
+            data-role="admin" aria-pressed="false">
+            <span class="role-symbol">🛡️</span>
+            Admin
+          </button>
+        </div>
+
+        <div class="selected-role-text" id="selectedRoleText">
+          Signing in as Student
+        </div>
 
         <form id="loginForm">
-
           <div class="field">
-            <label for="identifier">College Email / Username / Student ID</label>
+            <label for="identifier">College Email</label>
             <input
               id="identifier"
-              type="text"
-              placeholder="Enter your login ID"
+              type="email"
+              placeholder="Enter your college email"
               autocomplete="username"
               required
             >
@@ -70,8 +179,15 @@
             Sign in to portal →
           </button>
 
-          <div id="loginError" class="error"></div>
+          <div class="login-divider">OR</div>
 
+          <button class="google-btn" type="button" id="googleLoginBtn">
+            <span class="google-mark">G</span>
+            Continue with Google
+          </button>
+
+          <div id="loginError" class="error"
+            role="alert" aria-live="polite"></div>
         </form>
       </div>
     </div>
@@ -105,7 +221,6 @@
       </div>
 
     </aside>
-
 
     <main class="main">
 
